@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>KBC Quiz Game</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gradient-to-r from-purple-900 to-blue-900 min-h-screen">
+  <div class="container mx-auto px-4 py-8">
+    <!-- Header -->
+    <div class="text-center mb-8">
+      <h1 class="text-4xl font-bold text-yellow-400 mb-2">Kaun Banega Crorepati</h1>
+      <div id="timer" class="text-2xl text-white">Time: <span id="timeLeft">600</span>s</div>
+    </div>
+
+    <!-- Quiz -->
+    <div id="quiz-container" class="max-w-3xl mx-auto">
+      <!-- Questions will be inserted here -->
+    </div>
+
+    <!-- Submit Button -->
+    <div class="text-center mt-8">
+      <button id="submitQuiz" class="bg-yellow-500 hover:bg-yellow-600 text-black font-bold py-3 px-8 rounded-full text-xl hidden">
+        Submit Quiz
+      </button>
+    </div>
+  </div>
+
+  <script>
+    let currentQuestions = [];
+    let currentQuestionIndex = 0;
+    let userAnswers = [];
+    let timer;
+
+    async function fetchQuiz() {
+      try {
+        const response = await fetch('/api/quiz/generate');
+        const data = await response.json();
+
+        console.log('Fetched Quiz:', data);
+
+        // ✅ FIXED: Correct structure
+        if (data.status && Array.isArray(data.questions) && data.questions.length > 0) {
+          currentQuestions = data.questions;
+          startQuiz();
+        } else {
+          alert("❌ No quiz questions available. Please upload a valid PDF.");
+        }
+      } catch (error) {
+        console.error('Fetch Quiz Error:', error);
+        alert('❌ Failed to load quiz. Please try again.');
+      }
+    }
+
+    function startQuiz() {
+      currentQuestionIndex = 0;
+      userAnswers = [];
+      showQuestion(currentQuestionIndex);
+      startTimer();
+      document.getElementById('submitQuiz').classList.remove('hidden');
+    }
+
+    function showQuestion(index) {
+      const question = currentQuestions[index];
+      const quizContainer = document.getElementById('quiz-container');
+
+      const template = `
+        <div class="bg-white/10 backdrop-blur-md rounded-lg p-6 mb-6">
+          <div class="mb-6">
+            <h2 class="text-2xl font-bold text-yellow-400">${question.question}</h2>
+            <p class="text-white">Prize: ₹${question.prize}</p>
+          </div>
+
+          <!-- Lifelines -->
+          <div class="flex gap-4 mb-6 flex-wrap">
+            ${Object.entries(question.lifelines).map(([name, available]) => `
+              <button 
+                onclick="useLifeline('${name}', ${question.id})"
+                class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded ${available ? '' : 'opacity-50 cursor-not-allowed'}"
+                ${available ? '' : 'disabled'}
+              >
+                ${name.replace(/([A-Z])/g, ' $1').trim()}
+              </button>
+            `).join('')}
+          </div>
+
+          <!-- Options -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            ${Object.entries(question.options).map(([letter, text]) => `
+              <button 
+                onclick="selectOption(${question.id}, '${letter}')"
+                class="option-btn bg-purple-800 hover:bg-purple-700 text-white p-4 rounded-lg text-left"
+                data-question="${question.id}"
+                data-option="${letter}"
+              >
+                ${letter}) ${text}
+              </button>
+            `).join('')}
+          </div>
+        </div>
+      `;
+
+      quizContainer.innerHTML = template;
+    }
+
+    function selectOption(questionId, option) {
+      // Remove previous answer
+      userAnswers = userAnswers.filter(a => a.questionId !== questionId);
+
+      // Add selected answer
+      userAnswers.push({ questionId, selectedOption: option });
+
+      // Highlight selected option
+      document.querySelectorAll(`.option-btn[data-question="${questionId}"]`)
+        .forEach(btn => {
+          btn.classList.remove('bg-green-600');
+          if (btn.dataset.option === option) {
+            btn.classList.add('bg-green-600');
+          }
+        });
+
+      // Go to next question after 1.5s
+      setTimeout(() => {
+        if (currentQuestionIndex < currentQuestions.length - 1) {
+          currentQuestionIndex++;
+          showQuestion(currentQuestionIndex);
+        }
+      }, 1500);
+    }
+
+    function useLifeline(type, questionId) {
+      // You can expand this logic as needed
+      console.log(`Using lifeline: ${type} on question ${questionId}`);
+    }
+
+    function startTimer() {
+      let timeLeft = 600;
+      const timerElement = document.getElementById('timeLeft');
+
+      timer = setInterval(() => {
+        timeLeft--;
+        timerElement.textContent = timeLeft;
+
+        if (timeLeft <= 0) {
+          clearInterval(timer);
+          submitQuiz();
+        }
+      }, 1000);
+    }
+
+    async function submitQuiz() {
+      clearInterval(timer);
+
+      try {
+        const response = await fetch('/api/quiz/submit', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            answers: userAnswers,
+            timeRemaining: parseInt(document.getElementById('timeLeft').textContent)
+          })
+        });
+
+        const result = await response.json();
+        console.log('Quiz Result:', result);
+
+        if (result.status) {
+          alert(`🎉 Congratulations! You won ₹${result.prizeMoney}`);
+          window.location.href = '/results'; // change if needed
+        } else {
+          alert("❌ Submission failed: " + (result.message || 'Unknown error'));
+        }
+      } catch (error) {
+        console.error('Submit Quiz Error:', error);
+        alert('❌ Failed to submit quiz. Please try again.');
+      }
+    }
+
+    // Initialize quiz
+    document.addEventListener('DOMContentLoaded', fetchQuiz);
+    document.getElementById('submitQuiz').addEventListener('click', submitQuiz);
+  </script>
+</body>
+</html>

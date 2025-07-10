@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KBC Quiz Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-gray-100">
+    <div class="container mx-auto px-4 py-8">
+        <!-- Login Section -->
+        <div id="loginSection" class="max-w-md mx-auto bg-white rounded-lg shadow-md p-6 mb-8">
+            <h2 class="text-2xl font-bold mb-4">Login</h2>
+            <form id="loginForm" class="space-y-4">
+                <input type="text" id="username" placeholder="Username" class="w-full p-2 border rounded">
+                <input type="password" id="password" placeholder="Password" class="w-full p-2 border rounded">
+                <button type="submit" class="w-full bg-blue-500 text-white p-2 rounded hover:bg-blue-600">Login</button>
+            </form>
+            <p class="mt-4 text-center">
+                Don't have an account?
+                <a href="/register" class="text-blue-500 hover:text-blue-600">Register here</a>
+            </p>
+        </div>
+
+        <!-- Upload Section -->
+        <div id="uploadSection" class="max-w-md mx-auto bg-white rounded-lg shadow-md p-6 mb-8 hidden">
+            <h2 class="text-2xl font-bold mb-4">Upload PDF</h2>
+            <form id="uploadForm" class="space-y-4">
+                <input type="file" id="pdfFile" accept=".pdf" class="w-full p-2 border rounded">
+                <button type="submit" class="w-full bg-green-500 text-white p-2 rounded hover:bg-green-600">Upload
+                    PDF</button>
+            </form>
+            <button id="generateQuiz"
+                class="w-full mt-4 bg-purple-500 text-white p-2 rounded hover:bg-purple-600">Generate Quiz</button>
+        </div>
+
+        <!-- Quiz Section -->
+        <div id="quizSection" class="max-w-2xl mx-auto bg-white rounded-lg shadow-md p-6 hidden">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold">Quiz</h2>
+                <div id="score-display" class="text-xl font-bold text-blue-500">Score: 0</div>
+                <div id="timer" class="text-xl font-bold text-red-500"></div>
+            </div>
+            <div id="questions" class="space-y-6"></div>
+            <button id="submitQuiz" class="w-full mt-6 bg-blue-500 text-white p-2 rounded hover:bg-blue-600">Submit
+                Quiz</button>
+        </div>
+
+        <!-- Result Section -->
+        <div id="resultSection" class="max-w-md mx-auto bg-white rounded-lg shadow-md p-6 hidden">
+            <h2 class="text-2xl font-bold mb-4">Quiz Results</h2>
+            <div id="scoreDisplay" class="text-lg"></div>
+            <div id="timeDisplay" class="text-lg mt-2"></div>
+            <button id="newQuiz" class="w-full mt-4 bg-green-500 text-white p-2 rounded hover:bg-green-600">Start New
+                Quiz</button>
+        </div>
+    </div>
+
+    <script>
+        let token = '';
+        let timeRemaining = 600;
+        let timerInterval;
+        let currentQuiz = null;
+        let currentScore = 0;
+
+        // Login Handler
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                const data = await response.json();
+                if (data.token) {
+                    token = data.token;
+                    document.getElementById('loginSection').classList.add('hidden');
+                    document.getElementById('uploadSection').classList.remove('hidden');
+                }
+            } catch (error) {
+                alert('Login failed');
+            }
+        });
+
+        // Upload PDF Handler
+        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData();
+            formData.append('pdf', document.getElementById('pdfFile').files[0]);
+
+            try {
+                const response = await fetch('/api/quiz/upload', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` },
+                    body: formData
+                });
+                const data = await response.json();
+                if (data.status) {
+                    alert('PDF uploaded successfully');
+                }
+            } catch (error) {
+                alert('Upload failed');
+            }
+        });
+
+        // Generate Quiz Handler
+        document.getElementById('generateQuiz').addEventListener('click', async () => {
+            try {
+                const response = await fetch('/api/quiz/generate', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                const data = await response.json();
+                if (data.status) {
+                    currentQuiz = data.questions;
+                    displayQuiz(data.questions);
+                    startTimer();
+                    document.getElementById('uploadSection').classList.add('hidden');
+                    document.getElementById('quizSection').classList.remove('hidden');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Failed to generate quiz');
+            }
+        });
+
+        function displayQuiz(questions) {
+            const questionsContainer = document.getElementById('questions');
+            questionsContainer.innerHTML = questions.map((q, index) => `
+        <div class="question-container p-4 border rounded mb-4">
+            <p class="font-bold mb-2">${index + 1}. ${q.question}</p>
+            <div class="space-y-2">
+                ${Object.entries(q.options).map(([key, value]) => `
+                    <label class="block p-2 rounded transition-colors duration-300" id="option-${q.id}-${key}">
+                        <input type="radio" name="q${q.id}" value="${key}" 
+                            onclick="selectOption(${q.id}, '${key}', '${Object.entries(q.options).find(([k, v]) => v === q.correctAnswer)[0]}')">
+                        <span class="ml-2">${key}) ${value}</span>
+                    </label>
+                `).join('')}
+            </div>
+            <div class="mt-2 hidden" id="feedback-${q.id}"></div>
+        </div>
+    `).join('');
+
+            document.getElementById('score-display').textContent = `Score: ${currentScore}`;
+        }
+
+
+        function selectOption(questionId, selectedOption, correctAnswer) {
+            const optionElement = document.getElementById(`option-${questionId}-${selectedOption}`);
+            const correctElement = document.getElementById(`option-${questionId}-${correctAnswer}`);
+            const feedbackElement = document.getElementById(`feedback-${questionId}`);
+
+            // Disable all options for this question
+            const options = document.getElementsByName(`q${questionId}`);
+            options.forEach(option => option.disabled = true);
+
+            // Always highlight the correct answer in green
+            correctElement.classList.add('bg-green-200');
+
+            if (selectedOption === correctAnswer) {
+                optionElement.classList.add('bg-green-200');
+                feedbackElement.textContent = 'Correct!';
+                feedbackElement.classList.add('text-green-600');
+                currentScore++;
+            } else {
+                optionElement.classList.add('bg-red-200');
+                feedbackElement.textContent = 'Incorrect';
+                feedbackElement.classList.add('text-red-600');
+            }
+
+            feedbackElement.classList.remove('hidden');
+            document.getElementById('score-display').textContent = `Score: ${currentScore}`;
+        }
+
+
+        function startTimer() {
+            timeRemaining = 600;
+            updateTimerDisplay();
+            timerInterval = setInterval(() => {
+                timeRemaining--;
+                updateTimerDisplay();
+                if (timeRemaining <= 0) {
+                    submitQuiz();
+                }
+            }, 1000);
+        }
+
+        function updateTimerDisplay() {
+            const minutes = Math.floor(timeRemaining / 60);
+            const seconds = timeRemaining % 60;
+            document.getElementById('timer').textContent =
+                `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
+
+        // Submit Quiz Handler
+        document.getElementById('submitQuiz').addEventListener('click', submitQuiz);
+
+        async function submitQuiz() {
+            clearInterval(timerInterval);
+
+            const answers = Array.from(document.querySelectorAll('[name^="q"]'))
+                .filter(input => input.checked)
+                .map(input => ({
+                    questionId: parseInt(input.name.replace('q', '')),
+                    selectedOption: input.value
+                }));
+
+            try {
+                const response = await fetch('/api/quiz/submit', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        answers: answers,
+                        timeRemaining: timeRemaining,
+                        currentScore: currentScore // Send the current score
+                    })
+                });
+
+                const result = await response.json();
+                if (result.status) {
+                    showResults(result);
+                }
+            } catch (error) {
+                console.error('Submit Error:', error);
+                alert('Failed to submit quiz');
+            }
+        }
+
+        function showResults(result) {
+            document.getElementById('quizSection').classList.add('hidden');
+            document.getElementById('resultSection').classList.remove('hidden');
+
+            const scoreText = `Final Score: ${currentScore}/10`;
+            const timeText = `Time taken: ${Math.floor((600 - timeRemaining) / 60)}m ${(600 - timeRemaining) % 60}s`;
+
+            document.getElementById('scoreDisplay').textContent = scoreText;
+            document.getElementById('timeDisplay').textContent = timeText;
+        }
+
+        // New Quiz Handler
+        document.getElementById('newQuiz').addEventListener('click', () => {
+            currentScore = 0;
+            document.getElementById('resultSection').classList.add('hidden');
+            document.getElementById('uploadSection').classList.remove('hidden');
+        });
+    </script>
+</body>
+
+</html>
